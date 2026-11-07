@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>esp-name panel</title>
+<style>
+  :root {
+    --bg: #f4f2ee; --card: #fff; --ink: #1d1d1f; --muted: #6e6e73; --line: #e2dfd8;
+    --accent: #2f6fdb; --on: #1f8a4c; --warn: #b3261e;
+    --lcd-bg: #8fb339; --lcd-ink: #1e2b0b; --lcd-frame: #2b2b2b;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #141416; --card: #1e1e21; --ink: #f2f2f4; --muted: #9a9aa1; --line: #2e2e33;
+            --accent: #6b9bff; --on: #4cc27e; --warn: #ff6b60; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; display: grid; gap: 16px; }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; flex: 1; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0; }
+  .status { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .connected .dot { background: var(--on); }
+  button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+           border-radius: 8px; padding: 7px 14px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  .lcd { background: var(--lcd-frame); border-radius: 10px; padding: 14px; display: flex; justify-content: center; }
+  .lcd pre { margin: 0; background: var(--lcd-bg); color: var(--lcd-ink); font: 600 22px/1.25 var(--mono);
+             padding: 10px 14px; border-radius: 4px; letter-spacing: .08em; white-space: pre; max-width: 100%; overflow: hidden; }
+  .row { display: grid; grid-template-columns: 90px minmax(0, 1fr) auto; gap: 10px; align-items: center; margin-bottom: 10px; }
+  .row:last-child { margin-bottom: 0; }
+  label { color: var(--muted); font-size: 14px; }
+  input[type=text] { font: 15px var(--mono); padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px;
+                     background: var(--bg); color: var(--ink); width: 100%; min-width: 0; }
+  input[type=range] { width: 100%; }
+  .num { font: 14px var(--mono); min-width: 70px; text-align: right; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { border-radius: 999px; padding: 6px 12px; font-size: 14px; }
+  .chip.on { background: var(--on); border-color: var(--on); color: #fff; }
+  .chip-actions { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; }
+  td.mono { font-family: var(--mono); }
+  .near { color: var(--on); font-weight: 600; }
+  .empty { color: var(--muted); font-size: 14px; }
+  #log { font: 12px/1.5 var(--mono); background: var(--bg); border-radius: 8px; padding: 10px; height: 180px;
+         overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0 0 10px; }
+  .console { display: flex; gap: 8px; }
+  .notice { border-color: var(--warn); color: var(--warn); }
+  .hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+  .hidden { display: none; }
+  .mods { display: grid; gap: 6px; margin-bottom: 12px; }
+  .mod { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center;
+         font-size: 14px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .mod .name { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; }
+  .mod .meta { color: var(--muted); font-size: 13px; }
+  .mod .meta.bad { color: var(--warn); }
+  .upload { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .upload input[type=file] { font-size: 14px; min-width: 0; max-width: 100%; }
+  #mod-progress { font-size: 13px; color: var(--muted); }
+  @media (max-width: 520px) { .row { grid-template-columns: minmax(0, 1fr) auto; } .row label { grid-column: 1 / -1; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>esp-name panel</h1>
+    <span class="status" id="status"><span class="dot"></span><span id="status-text">not connected</span></span>
+    <button class="primary" id="connect">Connect</button>
+    <button id="disconnect" class="hidden">Disconnect</button>
+  </header>
+
+  <div class="card notice hidden" id="unsupported">
+    This browser has no Web Bluetooth. Open this page in Chrome or Edge on
+    <code>http://localhost</code>; Safari and Firefox can't talk to the tag.
+  </div>
+
+  <div class="card">
+    <div class="lcd"><pre id="lcd">
+                </pre></div>
+    <p class="hint">Preview of the idle screen. The first time you connect, macOS asks for the
+      tag's passkey: run <code>pin</code> on the serial console (<code>make monitor</code>) to see it.</p>
+  </div>
+
+  <section class="card">
+    <h2>Text</h2>
+    <div class="row">
+      <label for="name">Name</label>
+      <input type="text" id="name" maxlength="16" autocomplete="off" spellcheck="false">
+      <button data-save="name">Save</button>
+    </div>
+    <div class="row">
+      <label for="tag">Tagline</label>
+      <input type="text" id="tag" maxlength="16" autocomplete="off" spellcheck="false" placeholder="(none)">
+      <button data-save="tag">Save</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Idle animations</h2>
+    <div class="chips" id="fx"></div>
+    <div class="chip-actions">
+      <button id="fx-all">All</button>
+      <button id="fx-none">None</button>
+      <button id="beep">Beep</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Modules</h2>
+    <div id="mod-mode" class="hint hidden"></div>
+    <div class="mods" id="mods"><div class="empty">No modules installed.</div></div>
+    <div class="upload">
+      <input type="file" id="mod-file" accept=".wasm">
+      <button id="mod-install" disabled>Install</button>
+      <span id="mod-progress"></span>
+    </div>
+    <p class="hint">A module is an idle effect compiled to WebAssembly (<code>make mods</code> builds
+      <code>mods/*.c</code>). The tag checks it and test-runs it before saving it; it joins the
+      animations above right away, no reflash.</p>
+  </section>
+
+  <section class="card">
+    <h2>Proximity</h2>
+    <div class="row">
+      <label for="enter">Near at</label>
+      <input type="range" id="enter" min="-100" max="-30" step="1">
+      <span class="num" id="enter-val"></span>
+    </div>
+    <div class="row">
+      <label for="exit">Leaves at</label>
+      <input type="range" id="exit" min="-100" max="-30" step="1">
+      <span class="num" id="exit-val"></span>
+    </div>
+    <p class="hint">Stronger signal (closer to 0) is nearer. "Leaves at" stays at or below "Near at" so the
+      tag doesn't flap at the edge of range.</p>
+  </section>
+
+  <section class="card">
+    <h2>Tags in range</h2>
+    <div id="peers" class="empty">—</div>
+  </section>
+
+  <section class="card">
+    <h2>Console</h2>
+    <pre id="log"></pre>
+    <form class="console" id="console">
+      <input type="text" id="cmd" placeholder="help" autocomplete="off" spellcheck="false" maxlength="199">
+      <button>Send</button>
+    </form>
+  </section>
+</main>
+
+<script>
+// Must match src/remote.h.
+const SERVICE = "272f40ad-0a47-494b-89ec-3bf6066b9f75";
+const CMD = "073a383b-f1cb-43ad-a785-c9da4b4e8778";
+const OUT = "ab4c9ac2-ab36-4922-a5b5-f94dccdc83a5";
+const POLL_MS = 2000;
+const COLS = 16;
+
+const $ = (id) => document.getElementById(id);
+let device = null, cmdChr = null, pollTimer = null;
+let queue = Promise.resolve();     // GATT allows one operation at a time
+let rx = "";                       // partial reply line
+let state = null;
+const encoder = new TextEncoder(), decoder = new TextDecoder();
+
+if (!navigator.bluetooth) { $("unsupported").classList.remove("hidden"); $("connect").disabled = true; }
+
+function setStatus(text, connected) {
+  $("status-text").textContent = text;
+  $("status").classList.toggle("connected", connected);
+  $("connect").classList.toggle("hidden", connected);
+  $("disconnect").classList.toggle("hidden", !connected);
+}
+
+function log(line, cls) {
+  const el = $("log");
+  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 4;
+  el.textContent += line + "\n";
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+
+// Commands go out one at a time; replies arrive on OUT as notifications.
+function send(command, quiet = false) {
+  if (!cmdChr) return Promise.resolve();
+  if (command !== "state" && !quiet) log("> " + command);
+  queue = queue.then(() => cmdChr.writeValueWithResponse(encoder.encode(command)))
+               .catch((e) => log("! " + e.message));
+  return queue;
+}
+
+// `mod` subcommands answer with one "[mod] ..." line; modRequest() waits for it.
+let modWaiter = null;
+const MOD_REPLY_MS = 5000;
+
+function modRequest(command, quiet = false) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { modWaiter = null; reject(new Error("no reply to " + command.slice(0, 30))); }, MOD_REPLY_MS);
+    modWaiter = (line) => { clearTimeout(timer); modWaiter = null; resolve(line); };
+    send(command, quiet);
+  }).then((line) => {
+    if (line.startsWith("error")) throw new Error(line);
+    return line;
+  });
+}
+
+function onNotify(event) {
+  rx += decoder.decode(event.target.value);
+  let nl;
+  while ((nl = rx.indexOf("\n")) >= 0) {
+    const line = rx.slice(0, nl);
+    rx = rx.slice(nl + 1);
+    if (line.startsWith("{")) {
+      try { render(JSON.parse(line)); } catch { /* chunk lost in transit; next poll fixes it */ }
+    } else if (line.startsWith("[mod] ") && modWaiter) {
+      const reply = line.slice(6);
+      if (!reply.startsWith("ok ")) log(reply);   // chunk acks would flood the log
+      modWaiter(reply);
+    } else if (line) {
+      log(line.replace(/^\[tag\] /, ""));
+    }
+  }
+}
+
+async function connect() {
+  try {
+    device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE] }] });
+    device.addEventListener("gattserverdisconnected", onDisconnected);
+    await openLink();
+  } catch (e) {
+    if (e.name !== "NotFoundError") log("! " + e.message);   // NotFoundError: chooser cancelled
+    setStatus("not connected", false);
+  }
+}
+
+async function openLink() {
+  setStatus("connecting… (pair if macOS asks)", false);
+  const server = await device.gatt.connect();
+  const svc = await server.getPrimaryService(SERVICE);
+  cmdChr = await svc.getCharacteristic(CMD);
+  const out = await svc.getCharacteristic(OUT);
+  out.addEventListener("characteristicvaluechanged", onNotify);
+  await out.startNotifications();
+  rx = "";
+  queue = Promise.resolve();
+  setStatus("connected to " + (device.name || "tag"), true);
+  await send("state");
+  clearInterval(pollTimer);
+  pollTimer = setInterval(() => { if (!document.hidden) send("state"); }, POLL_MS);
+}
+
+function onDisconnected() {
+  clearInterval(pollTimer);
+  cmdChr = null;
+  setStatus("disconnected", false);
+  log("! link dropped");
+}
+
+// ---- Rendering ----
+
+function centered(text) {
+  text = text.slice(0, COLS);
+  const pad = Math.floor((COLS - text.length) / 2);
+  return (" ".repeat(pad) + text).padEnd(COLS);
+}
+
+// Fields being edited keep what the user typed instead of the polled value.
+function fill(input, value) {
+  if (document.activeElement !== input && !input.dataset.dirty) input.value = value;
+}
+
+function render(s) {
+  state = s;
+  $("lcd").textContent = centered(s.name) + "\n" + centered(s.tag);
+  fill($("name"), s.name);
+  fill($("tag"), s.tag);
+  fill($("enter"), s.enter);
+  fill($("exit"), s.exit);
+  $("enter-val").textContent = $("enter").value + " dBm";
+  $("exit-val").textContent = $("exit").value + " dBm";
+
+  const chips = $("fx");
+  for (const [name, on] of Object.entries(s.fx)) {
+    let chip = chips.querySelector(`[data-fx="${name}"]`);
+    if (!chip) {
+      chip = document.createElement("button");
+      chip.className = "chip";
+      chip.dataset.fx = name;
+      chip.textContent = name;
+      chip.onclick = () => send(`fx ${state.fx[name] ? "-" : "+"}${name}`).then(() => send("state"));
+      chips.append(chip);
+    }
+    chip.classList.toggle("on", on);
+  }
+  for (const chip of [...chips.children]) if (!(chip.dataset.fx in s.fx)) chip.remove();   // removed modules
+
+  renderMods(s.mods);
+
+  const peers = $("peers");
+  if (!s.peers.length) { peers.className = "empty"; peers.textContent = "No tags heard."; return; }
+  peers.className = "";
+  const rows = s.peers.sort((a, b) => b.rssi - a.rssi).map((p) => `
+    <tr><td>${escapeHtml(p.name)}</td><td class="mono">${p.id}</td>
+        <td class="mono">${p.rssi} dBm</td>
+        <td class="${p.near ? "near" : ""}">${p.near ? "near" : p.ago + "s ago"}</td>
+        <td>${p.met ? "met" : "new"}</td></tr>`).join("");
+  peers.innerHTML = `<table><tr><th>Name</th><th>ID</th><th>Signal</th><th>Seen</th><th></th></tr>${rows}</table>`;
+}
+
+function escapeHtml(t) {
+  return t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+}
+
+function renderMods(m) {
+  if (!m) return;   // firmware without modules
+  const mode = $("mod-mode");
+  const why = { off: "Modules are off (`mod on` turns them back on).",
+                safe: "Safe mode: the tag skipped modules after boots that didn't last. Send `mod on` to retry.",
+                nofs: "The tag has no filesystem, so modules can't be installed." }[m.mode];
+  mode.textContent = why || "";
+  mode.classList.toggle("hidden", !why);
+  const list = $("mods");
+  if (!m.list.length) { list.innerHTML = `<div class="empty">No modules installed.</div>`; return; }
+  list.innerHTML = m.list.map((x) => `
+    <div class="mod"><span class="name">${escapeHtml(x.name)}</span>
+      <span class="meta ${x.loaded && !x.ok ? "bad" : ""}">${x.bytes} B · ${
+        !x.loaded ? "not loaded" : x.ok ? "running" : "trapped"}</span>
+      <button data-rm="${escapeHtml(x.name)}">Remove</button></div>`).join("");
+  for (const b of list.querySelectorAll("[data-rm]"))
+    b.onclick = () => modRequest(`mod rm ${b.dataset.rm}`).catch((e) => log("! " + e.message)).then(() => send("state"));
+}
+
+const MOD_CHUNK = 120;   // raw bytes per `mod data`: 160 base64 chars, under the tag's 200
+
+function toBase64(bytes) {
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+async function installModule() {
+  const file = $("mod-file").files[0];
+  if (!file || !cmdChr) return;
+  const name = file.name.replace(/\.wasm$/, "").toLowerCase();
+  const data = new Uint8Array(await file.arrayBuffer());
+  const sha = [...new Uint8Array(await crypto.subtle.digest("SHA-256", data))]
+    .map((b) => b.toString(16).padStart(2, "0")).join("");
+  const progress = $("mod-progress");
+  $("mod-install").disabled = true;
+  clearInterval(pollTimer);   // keep the tag's 4-deep command queue free for chunks
+  try {
+    await modRequest("mod abort", true);
+    await modRequest(`mod put ${name} ${data.length} ${sha}`);
+    for (let off = 0; off < data.length; off += MOD_CHUNK) {
+      progress.textContent = `${Math.round((100 * off) / data.length)}%`;
+      await modRequest(`mod data ${off} ${toBase64(data.subarray(off, off + MOD_CHUNK))}`, true);
+    }
+    progress.textContent = "checking…";
+    await modRequest("mod end");
+    progress.textContent = "installed";
+  } catch (e) {
+    progress.textContent = "failed";
+    log("! " + e.message);
+  } finally {
+    $("mod-install").disabled = !$("mod-file").files.length;
+    pollTimer = setInterval(() => { if (!document.hidden) send("state"); }, POLL_MS);
+    send("state");
+  }
+}
+
+// ---- Controls ----
+
+// The LCD only has printable ASCII; anything else would show up as '?'.
+function lcdSafe(text) { return text.replace(/[^\x20-\x7e]/g, "?"); }
+
+for (const id of ["name", "tag"]) {
+  const input = $(id);
+  input.addEventListener("input", () => { input.dataset.dirty = "1"; });
+  const save = () => {
+    const value = lcdSafe(input.value.trim());
+    if (id === "name" && !value) { log("! name can't be empty"); return; }
+    delete input.dataset.dirty;
+    send(value ? `${id} ${value}` : id).then(() => send("state"));
+    input.blur();
+  };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") save(); });
+  document.querySelector(`[data-save="${id}"]`).onclick = save;
+}
+
+for (const id of ["enter", "exit"]) {
+  const input = $(id);
+  input.addEventListener("input", () => {
+    input.dataset.dirty = "1";
+    // Keep exit <= enter while dragging either one.
+    if (+$("exit").value > +$("enter").value) (id === "enter" ? $("exit") : $("enter")).value = input.value;
+    $("enter-val").textContent = $("enter").value + " dBm";
+    $("exit-val").textContent = $("exit").value + " dBm";
+  });
+  input.addEventListener("change", () => {
+    delete $("enter").dataset.dirty;
+    delete $("exit").dataset.dirty;
+    send(`near ${$("enter").value} ${$("exit").value}`).then(() => send("state"));
+  });
+}
+
+$("fx-all").onclick = () => send("fx all").then(() => send("state"));
+$("fx-none").onclick = () => send("fx none").then(() => send("state"));
+$("beep").onclick = () => send("beep");
+$("mod-file").onchange = () => { $("mod-install").disabled = !$("mod-file").files.length; $("mod-progress").textContent = ""; };
+$("mod-install").onclick = installModule;
+$("connect").onclick = () => (device && !device.gatt.connected ? openLink().catch((e) => log("! " + e.message)) : connect());
+$("disconnect").onclick = () => device && device.gatt.disconnect();
+$("console").onsubmit = (e) => {
+  e.preventDefault();
+  const command = $("cmd").value.trim();
+  if (command) send(command);
+  $("cmd").value = "";
+};
+</script>
+</body>
+</html>
